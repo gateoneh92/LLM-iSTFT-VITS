@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.so
+*.spec.pt
+logs/
+dummy_wavs/
+*.wav
+monotonic_align/build/
+monotonic_align/monotonic_align/
+pretrained/*.pth

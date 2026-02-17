@@ -1,70 +1,88 @@
 # 🌸 LLM-iSTFT-VITS
 
-> **Next-Generation Lightweight LLM-based Text-to-Speech System**
-
-[![GitHub Stars](https://img.shields.io/github/stars/gateoneh92/LLM-iSTFT-VITS?style=social)](https://github.com/gateoneh92/LLM-iSTFT-VITS)
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
-
-성웅왕자님을 위한 최첨단 LLM 기반 음성 합성 엔진입니다. 기존의 MB-iSTFT-VITS의 고속 합성 능력과 최신 LLM의 문맥 이해 능력을 하나로 합쳤습니다.
+Next-Generation Lightweight LLM-based Text-to-Speech System.
+이 프로젝트는 MB-iSTFT-VITS의 고속 합성 능력과 최신 LLM의 문맥 이해 능력을 결합한 최첨단 TTS 엔진입니다.
 
 ---
 
-## ✨ Key Features
+## 🚀 주요 특징 (Key Features)
 
-- **🧠 LLM-based Architecture**: 텍스트와 오디오 토큰을 동일한 언어 시퀀스로 처리하여 감정과 억양을 인간처럼 표현합니다.
-- **🎧 EnCodec Tokenization**: Meta AI의 EnCodec을 사용하여 고음질 음성을 압축된 토큰 시퀀스로 변환합니다.
-- **⚡ Ultra-Fast Decoder**: MB-iSTFT(Multi-Band Inverse Short-Time Fourier Transform) 기술을 통해 CPU에서도 실시간보다 빠르게 음성을 생성합니다.
-- **🎯 End-to-End Optimization**: 토큰 예측부터 파형 생성까지 전체 과정을 한 번에 최적화할 수 있도록 설계되었습니다.
-
----
-
-## 🏗️ Model Architecture
-
-본 프로젝트는 다음과 같은 세 단계의 혁신적인 구조로 이루어져 있습니다.
-
-1.  **Audio Tokenizer (EnCodec)**: 음성 파형을 이산적인(Discrete) 숫자의 나열(Audio Tokens)로 변환합니다.
-2.  **The Brain (Transformer LLM)**: 입력된 `[Text Tokens]`와 `[Audio Tokens]`를 순차적으로 학습하여 자연스러운 음성 토큰 흐름을 예측합니다.
-3.  **The Voice (MB-iSTFT Generator)**: 예측된 토큰을 다시 우리가 들을 수 있는 고해상도 음성 파형으로 복원합니다.
+- **🧠 LLM-기반 구조**: Transformer를 사용하여 텍스트와 오디오 토큰을 시퀀스로 처리, 자연스러운 감정과 억양 표현.
+- **🎧 EnCodec 토큰화**: Meta AI의 EnCodec을 통해 고음질 음성을 압축된 토큰 시퀀스로 변환 및 학습.
+- **⚡ 초고속 디코딩**: MB-iSTFT 기술을 채택하여 CPU에서도 실시간보다 수십 배 빠른 음성 생성 가능.
+- **📈 전이 학습(Transfer Learning) 지원**: 프리트레인드 디코더 가중치를 로드하여 적은 데이터로도 빠르게 고품질 학습 가능.
 
 ---
 
-## 🚀 Quick Start
+## 🛠️ 설치 방법 (Installation)
 
-### 1. Requirements
-
+### 1. 가상 환경 설정 및 패키지 설치
 ```bash
-pip install torch torchaudio encodec numpy
+# 가상 환경 생성
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 필수 라이브러리 설치
+pip install -U pip
+pip install torch torchaudio encodec numpy scipy matplotlib tensorboard cython librosa phonemizer unidecode
 ```
 
-### 2. Prepare Dataset
-
-`filelists/` 폴더에 학습 데이터를 준비하세요. 데이터 로더가 자동으로 EnCodec을 사용해 음성을 토큰화합니다.
-
-### 3. Training
-
+### 2. Monotonic Alignment 빌드 (필수)
+학습 및 추론을 위해 Cython 코드를 빌드해야 합니다.
 ```bash
-python train_latest.py -c configs/ljs_mb_istft_vits.json -m llm_tts_model
+cd monotonic_align
+python3 setup.py build_ext --inplace
+cd ..
 ```
 
 ---
 
-## 📂 File Structure
+## 📂 데이터 준비 (Dataset Preparation)
 
-- `llm_model.py`: 오디오와 텍스트를 함께 다루는 Transformer 모델 정의
-- `audio_tokenizer.py`: EnCodec 기반의 음성 토큰화 로직
-- `models.py`: LLMSynthesizer와 MB-iSTFT Generator 통합 구조
-- `train_latest.py`: LLM과 디코더를 동시에 학습하는 통합 스크립트
+1.  `wavs/` 폴더에 학습용 오디오 파일(.wav, 22050Hz 권장)을 준비합니다.
+2.  `filelists/` 폴더에 학습용 목록 파일을 만듭니다. (형식: `파일절대경로|텍스트`)
+    *   예: `/path/to/audio.wav|This is a sample sentence.`
+
+---
+
+## 🏋️ 학습 방법 (Training)
+
+학습 시 프리트레인드 디코더(MB-iSTFT-VITS)를 사용하면 훨씬 빠르게 성능을 올릴 수 있습니다.
+
+### 프리트레인드 모델로 시작하기 (추천)
+```bash
+python3 train_latest.py \
+  -c configs/ljs_mb_istft_vits.json \
+  -m [모델이름] \
+  -p pretrained/pretrained_MB-iSTFT-VITS_ddp.pth
+```
+*   `-p`: 프리트레인드 디코더 가중치 경로를 지정합니다. (자동으로 디코더 부분만 이식됩니다.)
+
+### 처음부터 학습하기
+```bash
+python3 train_latest.py -c configs/ljs_mb_istft_vits.json -m [모델이름]
+```
+
+---
+
+## 🎙️ 합성 방법 (Inference / Synthesis)
+
+학습된 체크포인트 또는 프리트레인드 모델을 사용하여 음성을 합성합니다.
+
+### 1. 테스트 스크립트 활용
+`test_llm_repo.py`를 수정하여 원하는 텍스트를 입력하고 실행합니다.
+```bash
+python3 test_llm_repo.py
+```
+
+### 2. Jupyter Notebook 활용
+`inference.ipynb`를 열어 대화형으로 음성을 합성하고 결과를 즉시 확인할 수 있습니다.
 
 ---
 
 ## 🤝 Acknowledgements
-
-This work is based on:
 - [MB-iSTFT-VITS](https://github.com/MasayaKawamura/MB-iSTFT-VITS)
 - [Official VITS](https://github.com/jaywalnut310/vits)
 - [Meta EnCodec](https://github.com/facebookresearch/encodec)
-
----
 
 **Developed for 성웅왕자님 by 정화 🌸**

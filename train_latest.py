@@ -131,6 +131,8 @@ def run(rank, n_gpus, hps):
   except:
     epoch_str = 1
     global_step = 0
+    if hps.pretrained_gen != "":
+      utils.load_pretrained_generator(hps.pretrained_gen, net_g)
 
   scheduler_g = torch.optim.lr_scheduler.ExponentialLR(optim_g, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
   scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optim_d, gamma=hps.train.lr_decay, last_epoch=epoch_str-2)
@@ -170,9 +172,28 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       # LLMSynthesizer forward: 오디오 토큰 예측
       audio_logits = net_g(x, audio_tokens)
       
+      # LLM Loss 계산 (텍스트 이후의 오디오 토큰 예측 부분만 추출)
+      # logits: [batch, text_len + audio_len, n_audio_vocab]
+      # targets: [batch, n_codebooks, audio_len] -> [batch, audio_len-1] (코드북 0번 기준)
+      text_len = x.size(1)
+      # 오디오 토큰 시퀀스에 대응하는 로짓만 슬라이싱
+      # 텍스트의 마지막 토큰 위치가 첫 번째 오디오 토큰을 예측하는 지점임
+      audio_logits_for_loss = audio_logits[:, text_len-1:-1, :]
+      audio_targets = audio_tokens[:, 0, :]
+      
       # VITS 디코더 부분 학습을 위한 오디오 합성 (Teacher Forcing 스타일)
-      # 실제로는 LLM 출력을 디코더에 연결하는 로직이 모델 내부에 있어야 함
-      y_hat, y_hat_mb = net_g.module.infer(x, audio_tokens) if n_gpus > 1 else net_g.infer(x, audio_tokens)
+      # LLM이 예측한 토큰이 아니라, 실제 Ground Truth 오디오 토큰의 임베딩을 디코더에 넣습니다.
+      if n_gpus > 1:
+        model = net_g.module
+      else:
+        model = net_g
+
+      # LLMSynthesizer 내부의 디코더를 직접 호출하거나, 토큰 기반으로 강제 합성
+      x_emb = 0
+      for i in range(model.llm.n_codebooks):
+          x_emb += model.llm.audio_embs[i](audio_tokens[:, i, :])
+      z = model.token_proj(x_emb).transpose(1, 2)
+      y_hat, y_hat_mb = model.dec(z)
 
       mel = spec_to_mel_torch(
           spec, 
@@ -215,7 +236,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y[:,:,:min_wav_len], y_hat[:,:,:min_wav_len])
       with autocast(enabled=False):
         # 1. LLM Loss (어휘 예측)
-        loss_llm_val = llm_loss(audio_logits, audio_tokens[:, 0, 1:]) # 다음 토큰 예측
+        loss_llm_val = llm_loss(audio_logits_for_loss, audio_targets) # 다음 토큰 예측
         
         # 2. VITS Decoder Losses
         # 길이 맞추기 (STFT 패딩 차이로 인해 발생 가능)
@@ -269,7 +290,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           scalars=scalar_dict)
 
       if global_step % hps.train.eval_interval == 0:
-        evaluate(hps, net_g, eval_loader, writer_eval)
+        evaluate(hps, net_g, eval_loader, writer_eval, device)
         utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
         utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
     global_step += 1
@@ -281,13 +302,14 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     
 
  
-def evaluate(hps, generator, eval_loader, writer_eval):
+def evaluate(hps, generator, eval_loader, writer_eval, device):
     generator.eval()
     with torch.no_grad():
-      for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths) in enumerate(eval_loader):
-        x, x_lengths = x.cuda(0), x_lengths.cuda(0)
-        spec, spec_lengths = spec.cuda(0), spec_lengths.cuda(0)
-        y, y_lengths = y.cuda(0), y_lengths.cuda(0)
+      for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, audio_tokens, audio_token_lengths) in enumerate(eval_loader):
+        x, x_lengths = x.to(device), x_lengths.to(device)
+        spec, spec_lengths = spec.to(device), spec_lengths.to(device)
+        y, y_lengths = y.to(device), y_lengths.to(device)
+        audio_tokens = audio_tokens.to(device)
 
         # remove else
         x = x[:1]
@@ -296,9 +318,20 @@ def evaluate(hps, generator, eval_loader, writer_eval):
         spec_lengths = spec_lengths[:1]
         y = y[:1]
         y_lengths = y_lengths[:1]
+        audio_tokens = audio_tokens[:1]
         break
-      y_hat, y_hat_mb, attn, mask, *_ = generator.module.infer(x, x_lengths, max_len=1000)
-      y_hat_lengths = mask.sum([1,2]).long() * hps.data.hop_length
+      
+      if isinstance(generator, (DDP, nn.DataParallel)):
+        model = generator.module
+      else:
+        model = generator
+        
+      if isinstance(model, LLMSynthesizer):
+        y_hat, y_hat_mb = model.infer(x, max_len=100)
+        y_hat_lengths = torch.tensor([y_hat.size(-1)], device=device)
+      else:
+        y_hat, y_hat_mb, attn, mask, *_ = model.infer(x, x_lengths, max_len=1000)
+        y_hat_lengths = mask.sum([1,2]).long() * hps.data.hop_length
 
       mel = spec_to_mel_torch(
         spec, 

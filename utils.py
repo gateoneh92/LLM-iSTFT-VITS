@@ -149,6 +149,8 @@ def get_hparams(init=True):
                       help='JSON file for configuration')
   parser.add_argument('-m', '--model', type=str, required=True,
                       help='Model name')
+  parser.add_argument('-p', '--pretrained_gen', type=str, default="",
+                      help='Path to pretrained generator checkpoint')
   
   args = parser.parse_args()
   model_dir = os.path.join("./logs", args.model)
@@ -170,6 +172,7 @@ def get_hparams(init=True):
   
   hparams = HParams(**config)
   hparams.model_dir = model_dir
+  hparams.pretrained_gen = args.pretrained_gen
   return hparams
 
 
@@ -258,3 +261,38 @@ class HParams():
 
   def __repr__(self):
     return self.__dict__.__repr__()
+
+
+def load_pretrained_generator(checkpoint_path, model):
+  """
+  프리트레인된 MB-iSTFT-VITS 가중치에서 Generator(dec) 부분만 로드합니다.
+  """
+  if not os.path.isfile(checkpoint_path):
+    print(f"Pretrained model not found: {checkpoint_path}")
+    return model
+
+  checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
+  saved_state_dict = checkpoint_dict['model']
+  
+  if hasattr(model, 'module'):
+    target_model = model.module
+  else:
+    target_model = model
+
+  # LLMSynthesizer의 경우 self.dec가 Generator입니다.
+  # 프리트레인드 모델의 'dec.'으로 시작하는 가중치들을 추출합니다.
+  new_state_dict = {}
+  dec_count = 0
+  
+  for k, v in saved_state_dict.items():
+    if k.startswith('dec.'):
+      new_state_dict[k] = v
+      dec_count += 1
+  
+  # 현재 모델의 state_dict를 가져와서 업데이트
+  model_state_dict = target_model.state_dict()
+  model_state_dict.update(new_state_dict)
+  target_model.load_state_dict(model_state_dict)
+  
+  print(f"Loaded {dec_count} pretrained generator weights from '{checkpoint_path}'")
+  return model
