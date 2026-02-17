@@ -563,6 +563,57 @@ class MultiPeriodDiscriminator(torch.nn.Module):
 
 
 
+class LLMSynthesizer(nn.Module):
+  """
+  LLM-based Synthesizer that uses MB-iSTFT-VITS Generator as Decoder
+  """
+  def __init__(self,
+    n_text_vocab,
+    n_audio_vocab,
+    n_codebooks,
+    inter_channels,
+    resblock,
+    resblock_kernel_sizes,
+    resblock_dilation_sizes,
+    upsample_rates,
+    upsample_initial_channel,
+    upsample_kernel_sizes,
+    gen_istft_n_fft,
+    gen_istft_hop_size,
+    subbands,
+    mb_istft_vits=True,
+    gin_channels=0,
+    **kwargs):
+    super().__init__()
+    
+    # LLM Part
+    from llm_model import AudioTextTransformer
+    self.llm = AudioTextTransformer(n_text_vocab, n_audio_vocab, n_codebooks)
+    
+    # Decoder Part (From MB-iSTFT-VITS)
+    self.dec = Multiband_iSTFT_Generator(
+        inter_channels, resblock, resblock_kernel_sizes, resblock_dilation_sizes, 
+        upsample_rates, upsample_initial_channel, upsample_kernel_sizes, 
+        gen_istft_n_fft, gen_istft_hop_size, subbands, gin_channels=gin_channels)
+    
+    # 토큰 임베딩을 Generator 입력 채널에 맞추는 프로젝션
+    self.token_proj = nn.Linear(512, inter_channels)
+
+  def forward(self, text_tokens, audio_tokens):
+    # LLM이 다음 오디오 토큰 예측
+    logits = self.llm(text_tokens, audio_tokens)
+    return logits
+
+  def infer(self, text_tokens, audio_tokens):
+    # LLM으로 생성된 토큰을 MB-iSTFT 디코더로 소리 합성
+    # 실제로는 AR 생성이 필요하지만 구조 통합 예시로 작성
+    x = self.llm.text_emb(text_tokens) 
+    # ... 토큰 생성 로직 ...
+    # 생성된 특징벡터(예: h)를 디코더에 전달
+    z = self.token_proj(x).transpose(1, 2)
+    o, o_mb = self.dec(z)
+    return o, o_mb
+
 class SynthesizerTrn(nn.Module):
   """
   Synthesizer for Training
