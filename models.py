@@ -582,6 +582,7 @@ class LLMSynthesizer(nn.Module):
     gen_istft_hop_size,
     subbands,
     n_speakers=0, # 멀티 스피커 정보 추가
+    n_emotions=0, # 추가: 감정 제어 지원
     mb_istft_vits=True,
     gin_channels=0,
     **kwargs):
@@ -589,7 +590,13 @@ class LLMSynthesizer(nn.Module):
     
     # LLM Part
     from llm_model import AudioTextTransformer
-    self.llm = AudioTextTransformer(n_text_vocab, n_audio_vocab, n_codebooks, n_speakers=n_speakers)
+    self.llm = AudioTextTransformer(
+        n_text_vocab, 
+        n_audio_vocab, 
+        n_codebooks, 
+        n_speakers=n_speakers,
+        n_emotions=n_emotions
+    )
     
     # Decoder Part (From MB-iSTFT-VITS)
     self.dec = Multiband_iSTFT_Generator(
@@ -600,12 +607,12 @@ class LLMSynthesizer(nn.Module):
     # 토큰 임베딩을 Generator 입력 채널에 맞추는 프로젝션
     self.token_proj = nn.Linear(512, inter_channels)
 
-  def forward(self, text_tokens, audio_tokens, sid=None):
+  def forward(self, text_tokens, audio_tokens, sid=None, eid=None):
     # LLM이 다음 오디오 토큰 예측 (Training용)
-    logits = self.llm(text_tokens, audio_tokens, sid=sid)
+    logits = self.llm(text_tokens, audio_tokens, sid=sid, eid=eid)
     return logits
 
-  def infer(self, text_tokens, max_len=100, sid=None, g=None):
+  def infer(self, text_tokens, max_len=100, sid=None, eid=None, g=None):
     """
     실시간 추론 모드: KV 캐시를 사용하여 오디오 토큰을 하나씩 생성합니다.
     """
@@ -626,6 +633,7 @@ class LLMSynthesizer(nn.Module):
             text_tokens, 
             current_audio_tokens, 
             sid=sid, 
+            eid=eid,
             use_cache=True, 
             past_key_values=past_key_values
         )

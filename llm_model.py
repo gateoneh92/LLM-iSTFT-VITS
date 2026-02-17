@@ -8,7 +8,8 @@ class AudioTextTransformer(nn.Module):
                  n_text_vocab, 
                  n_audio_vocab, 
                  n_codebooks=8,
-                 n_speakers=0, # 추가: 멀티 스피커 지원
+                 n_speakers=0, 
+                 n_emotions=0, # 추가: 감정 제어 지원
                  d_model=512, 
                  nhead=8, 
                  num_layers=12, 
@@ -18,15 +19,20 @@ class AudioTextTransformer(nn.Module):
         self.d_model = d_model
         self.n_codebooks = n_codebooks
         
-        # 텍스트 및 오디오 토큰 임베딩
+        # 임베딩 레이어들
         self.text_emb = nn.Embedding(n_text_vocab, d_model)
         self.audio_embs = nn.ModuleList([nn.Embedding(n_audio_vocab + 1, d_model) for _ in range(n_codebooks)])
         
-        # 추가: 스피커 임베딩
         if n_speakers > 0:
             self.spk_emb = nn.Embedding(n_speakers, d_model)
         else:
             self.spk_emb = None
+
+        # 추가: 감정 임베딩
+        if n_emotions > 0:
+            self.emo_emb = nn.Embedding(n_emotions, d_model)
+        else:
+            self.emo_emb = None
 
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         
@@ -36,11 +42,9 @@ class AudioTextTransformer(nn.Module):
         
         self.audio_head = nn.Linear(d_model, n_audio_vocab)
         
-    def forward(self, text_tokens, audio_tokens, sid=None, use_cache=False, past_key_values=None):
-        # text_tokens: [batch, text_len]
-        # audio_tokens: [batch, n_codebooks, audio_len]
+    def forward(self, text_tokens, audio_tokens, sid=None, eid=None, use_cache=False, past_key_values=None):
+        # eid: [batch] (Emotion ID)
         
-        # 캐시가 있다면 오디오 토큰의 마지막 하나만 처리
         if use_cache and past_key_values is not None:
             audio_tokens = audio_tokens[:, :, -1:]
             
@@ -50,15 +54,20 @@ class AudioTextTransformer(nn.Module):
         for i in range(self.n_codebooks):
             a_emb += self.audio_embs[i](audio_tokens[:, i, :])
         
-        # 입력 결합
         if use_cache and past_key_values is not None:
-            x = a_emb # 캐시 모드일 때는 새로운 오디오 임베딩만 입력
+            x = a_emb
         else:
             x = torch.cat([t_emb, a_emb], dim=1)
         
+        # 화자 정보 결합
         if self.spk_emb is not None and sid is not None:
             s_emb = self.spk_emb(sid).unsqueeze(1)
             x = x + s_emb
+            
+        # 추가: 감정 정보 결합
+        if self.emo_emb is not None and eid is not None:
+            e_emb = self.emo_emb(eid).unsqueeze(1)
+            x = x + e_emb
             
         x = self.pos_encoder(x)
         
