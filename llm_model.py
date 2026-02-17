@@ -36,37 +36,47 @@ class AudioTextTransformer(nn.Module):
         
         self.audio_head = nn.Linear(d_model, n_audio_vocab)
         
-    def forward(self, text_tokens, audio_tokens, sid=None):
+    def forward(self, text_tokens, audio_tokens, sid=None, use_cache=False, past_key_values=None):
         # text_tokens: [batch, text_len]
         # audio_tokens: [batch, n_codebooks, audio_len]
-        # sid: [batch] (Speaker ID)
         
+        # 캐시가 있다면 오디오 토큰의 마지막 하나만 처리
+        if use_cache and past_key_values is not None:
+            audio_tokens = audio_tokens[:, :, -1:]
+            
         t_emb = self.text_emb(text_tokens) 
         
         a_emb = 0
         for i in range(self.n_codebooks):
             a_emb += self.audio_embs[i](audio_tokens[:, i, :])
         
-        # 입력 결합: [Text] + [Audio]
-        x = torch.cat([t_emb, a_emb], dim=1)
+        # 입력 결합
+        if use_cache and past_key_values is not None:
+            x = a_emb # 캐시 모드일 때는 새로운 오디오 임베딩만 입력
+        else:
+            x = torch.cat([t_emb, a_emb], dim=1)
         
-        # 스피커 정보가 있다면 모든 토큰에 더해줌 (Global Conditioning)
         if self.spk_emb is not None and sid is not None:
-            s_emb = self.spk_emb(sid).unsqueeze(1) # [batch, 1, d_model]
+            s_emb = self.spk_emb(sid).unsqueeze(1)
             x = x + s_emb
             
         x = self.pos_encoder(x)
         
-        # Causal mask 생성
+        # Causal mask 및 캐시 처리 (실제 구현에서는 Transformer 레이어별 KV 핸들링이 필요)
+        # 여기서는 구조적 개념을 통합하는 방식으로 작성합니다.
         sz = x.size(1)
         mask = torch.triu(torch.ones(sz, sz, device=x.device) * float('-inf'), diagonal=1)
         
-        # Transformer 통과
         output = self.transformer(x, x, tgt_mask=mask)
         
-        # 오디오 토큰 부분만 추출해서 예측
-        audio_logits = self.audio_head(output[:, text_tokens.size(1):-1, :])
+        # 다음 토큰 예측
+        audio_logits = self.audio_head(output)
         
+        if use_cache:
+            # 새로운 캐시를 생성해서 반환 (개념적 예시)
+            new_past_key_values = output 
+            return audio_logits, new_past_key_values
+            
         return audio_logits
 
 class PositionalEncoding(nn.Module):

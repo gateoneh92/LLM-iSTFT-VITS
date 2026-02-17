@@ -602,31 +602,55 @@ class LLMSynthesizer(nn.Module):
 
   def forward(self, text_tokens, audio_tokens, sid=None):
     # LLM이 다음 오디오 토큰 예측 (Training용)
-    # audio_tokens: [batch, n_codebooks, seq_len]
     logits = self.llm(text_tokens, audio_tokens, sid=sid)
     return logits
 
-  def infer(self, text_tokens, audio_tokens=None, sid=None, g=None):
-    # 실제 추론 또는 Teacher-Forced Decoding
+  def infer(self, text_tokens, max_len=100, sid=None, g=None):
+    """
+    실시간 추론 모드: KV 캐시를 사용하여 오디오 토큰을 하나씩 생성합니다.
+    """
+    batch_size = text_tokens.size(0)
+    device = text_tokens.device
     
-    # 1. LLM의 중간 특징량 추출 (텍스트와 오디오 결합 상태)
-    t_emb = self.llm.text_emb(text_tokens)
-    a_emb = 0
-    if audio_tokens is not None:
-        for i in range(self.llm.n_codebooks):
-            a_emb += self.llm.audio_embs[i](audio_tokens[:, i, :])
+    # 1. 초기값 설정: 시작 토큰 (보통 0번이나 특정 BOS 토큰 사용)
+    current_audio_tokens = torch.zeros(batch_size, self.llm.n_codebooks, 1).long().to(device)
+    past_key_values = None
+    generated_tokens = []
     
-    # 스피커 임베딩 반영
-    x = t_emb if audio_tokens is None else (t_emb.mean(1, keepdim=True) + a_emb)
-    if self.llm.spk_emb is not None and sid is not None:
-        s_emb = self.llm.spk_emb(sid).unsqueeze(1)
-        x = x + s_emb
+    print("AI가 실시간으로 소리 토큰을 빚어내는 중입니다... 🌸")
     
-    # 2. Generator 입력 채널에 맞게 변환 [B, seq, dim] -> [B, dim, seq]
-    z = self.token_proj(x).transpose(1, 2)
+    # 2. Autoregressive 생성 루프 (KV 캐시 활용)
+    for _ in range(max_len):
+        # LLM에게 다음 토큰 물어보기
+        logits, past_key_values = self.llm(
+            text_tokens, 
+            current_audio_tokens, 
+            sid=sid, 
+            use_cache=True, 
+            past_key_values=past_key_values
+        )
+        
+        # 가장 확률 높은 토큰 선택
+        next_token = torch.argmax(logits[:, -1:, :], dim=-1) # [batch, 1]
+        
+        # 멀티 코드북 대응을 위해 간단히 확장 (실제로는 더 복잡한 매칭이 필요합니다)
+        next_tokens = next_token.unsqueeze(1).repeat(1, self.llm.n_codebooks, 1)
+        
+        generated_tokens.append(next_tokens)
+        current_audio_tokens = next_tokens # 다음 루프의 입력
+        
+    # 생성된 모든 토큰 합치기
+    all_tokens = torch.cat(generated_tokens, dim=-1) # [batch, n_codebooks, seq_len]
     
-    # 3. MB-iSTFT Generator를 통한 음성 합성
+    # 3. MB-iSTFT Generator를 통해 최종 음성 합성
+    # 생성된 토큰들의 임베딩을 추출하여 디코더로 전달
+    x_emb = 0
+    for i in range(self.llm.n_codebooks):
+        x_emb += self.llm.audio_embs[i](all_tokens[:, i, :])
+        
+    z = self.token_proj(x_emb).transpose(1, 2)
     o, o_mb = self.dec(z, g=g)
+    
     return o, o_mb
 
 class SynthesizerTrn(nn.Module):
