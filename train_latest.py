@@ -23,6 +23,7 @@ from data_utils import (
 )
 from models import (
   SynthesizerTrn,
+  LLMSynthesizer,
   MultiPeriodDiscriminator,
 )
 from losses import (
@@ -39,6 +40,11 @@ torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.benchmark = True
 global_step = 0
 
+# LLM 손실 함수 정의 (Cross Entropy)
+def llm_loss(logits, targets):
+  # logits: [batch, seq_len, n_audio_vocab]
+  # targets: [batch, seq_len]
+  return F.cross_entropy(logits.reshape(-1, logits.size(-1)), targets.reshape(-1))
 
 def main():
   """Assume Single Node Multi GPUs Training Only"""
@@ -83,11 +89,24 @@ def run(rank, n_gpus, hps):
         batch_size=hps.train.batch_size, pin_memory=True,
         drop_last=False, collate_fn=collate_fn)
 
-  net_g = SynthesizerTrn(
+  # LLMSynthesizer 사용하도록 변경
+  net_g = LLMSynthesizer(
       len(symbols),
-      hps.data.filter_length // 2 + 1,
-      hps.train.segment_size // hps.data.hop_length,
-      **hps.model).cuda(rank)
+      n_audio_vocab=1024, # EnCodec 기본 어휘 사전 크기
+      n_codebooks=8,      # EnCodec 기본 코드북 수
+      inter_channels=hps.model.inter_channels,
+      resblock=hps.model.resblock,
+      resblock_kernel_sizes=hps.model.resblock_kernel_sizes,
+      resblock_dilation_sizes=hps.model.resblock_dilation_sizes,
+      upsample_rates=hps.model.upsample_rates,
+      upsample_initial_channel=hps.model.upsample_initial_channel,
+      upsample_kernel_sizes=hps.model.upsample_kernel_sizes,
+      gen_istft_n_fft=hps.model.gen_istft_n_fft,
+      gen_istft_hop_size=hps.model.gen_istft_hop_size,
+      subbands=hps.model.subbands,
+      gin_channels=hps.model.gin_channels
+  ).cuda(rank)
+  
   net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
   optim_g = torch.optim.AdamW(
       net_g.parameters(), 
@@ -138,14 +157,19 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
   net_g.train()
   net_d.train()
-  for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths) in enumerate(train_loader):
+  for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, audio_tokens, audio_token_lengths) in enumerate(train_loader):
     x, x_lengths = x.cuda(rank, non_blocking=True), x_lengths.cuda(rank, non_blocking=True)
     spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
     y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
+    audio_tokens = audio_tokens.cuda(rank, non_blocking=True)
 
     with autocast(enabled=hps.train.fp16_run):
-      y_hat, y_hat_mb, l_length, attn, ids_slice, x_mask, z_mask,\
-      (z, z_p, m_p, logs_p, m_q, logs_q) = net_g(x, x_lengths, spec, spec_lengths)
+      # LLMSynthesizer forward: 오디오 토큰 예측
+      audio_logits = net_g(x, audio_tokens)
+      
+      # VITS 디코더 부분 학습을 위한 오디오 합성 (Teacher Forcing 스타일)
+      # 실제로는 LLM 출력을 디코더에 연결하는 로직이 모델 내부에 있어야 함
+      y_hat, y_hat_mb = net_g.module.infer(x, audio_tokens)
 
       mel = spec_to_mel_torch(
           spec, 
@@ -154,7 +178,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           hps.data.sampling_rate,
           hps.data.mel_fmin, 
           hps.data.mel_fmax)
-      y_mel = commons.slice_segments(mel, ids_slice, hps.train.segment_size // hps.data.hop_length)
+      
+      # 슬라이싱 대신 전체 길이로 예시 (실제로는 최적화 필요)
       y_hat_mel = mel_spectrogram_torch(
           y_hat.squeeze(1), 
           hps.data.filter_length, 
@@ -166,9 +191,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           hps.data.mel_fmax
       )
 
-      y = commons.slice_segments(y, ids_slice * hps.data.hop_length, hps.train.segment_size) # slice 
-
-      # Discriminator
+      # Discriminator 학습
       y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
       with autocast(enabled=False):
         loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
@@ -179,17 +202,15 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     grad_norm_d = commons.clip_grad_value_(net_d.parameters(), None)
     scaler.step(optim_d)
 
-    
-
-
     with autocast(enabled=hps.train.fp16_run):
-      # Generator
+      # Generator & LLM 학습
       y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
       with autocast(enabled=False):
-        loss_dur = torch.sum(l_length.float())
-        loss_mel = F.l1_loss(y_mel, y_hat_mel) * hps.train.c_mel
-        loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * hps.train.c_kl
-
+        # 1. LLM Loss (어휘 예측)
+        loss_llm_val = llm_loss(audio_logits, audio_tokens[:, 0, 1:]) # 다음 토큰 예측
+        
+        # 2. VITS Decoder Losses
+        loss_mel = F.l1_loss(mel, y_hat_mel) * hps.train.c_mel
         loss_fm = feature_loss(fmap_r, fmap_g)
         loss_gen, losses_gen = generator_loss(y_d_hat_g)
         
@@ -200,7 +221,8 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
         else:
           loss_subband = torch.tensor(0.0)
 
-        loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl + loss_subband
+        # 전체 손실 합산
+        loss_gen_all = loss_gen + loss_fm + loss_mel + loss_subband + loss_llm_val * 10.0 # LLM 비중 조절
 
     optim_g.zero_grad()
     scaler.scale(loss_gen_all).backward()

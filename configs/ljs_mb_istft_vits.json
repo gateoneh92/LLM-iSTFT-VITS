@@ -58,7 +58,10 @@
     "upsample_kernel_sizes": [16,16],
     "n_layers_q": 3,
     "use_spectral_norm": false,
-    "use_sdp": false
+    "use_sdp": false,
+    "n_text_vocab": 200,
+    "n_audio_vocab": 1024,
+    "n_codebooks": 8
   }
 
 }

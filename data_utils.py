@@ -33,6 +33,10 @@ class TextAudioLoader(torch.utils.data.Dataset):
         self.min_text_len = getattr(hparams, "min_text_len", 1)
         self.max_text_len = getattr(hparams, "max_text_len", 190)
 
+        # LLM 업그레이드를 위한 토크나이저 초기화
+        from audio_tokenizer import AudioTokenizer
+        self.tokenizer = AudioTokenizer()
+
         random.seed(1234)
         random.shuffle(self.audiopaths_and_text)
         self._filter()
@@ -60,7 +64,11 @@ class TextAudioLoader(torch.utils.data.Dataset):
         audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
         text = self.get_text(text)
         spec, wav = self.get_audio(audiopath)
-        return (text, spec, wav)
+        
+        # LLM용 오디오 토큰 생성
+        audio_tokens = self.tokenizer.encode(audiopath).squeeze(0) # [n_codebooks, seq_len]
+        
+        return (text, spec, wav, audio_tokens)
 
     def get_audio(self, filename):
         audio, sampling_rate = load_wav_to_torch(filename)
@@ -107,7 +115,7 @@ class TextAudioCollate():
         """Collate's training batch from normalized text and aduio
         PARAMS
         ------
-        batch: [text_normalized, spec_normalized, wav_normalized]
+        batch: [text_normalized, spec_normalized, wav_normalized, audio_tokens]
         """
         # Right zero-pad all one-hot text sequences to max input length
         _, ids_sorted_decreasing = torch.sort(
@@ -117,17 +125,23 @@ class TextAudioCollate():
         max_text_len = max([len(x[0]) for x in batch])
         max_spec_len = max([x[1].size(1) for x in batch])
         max_wav_len = max([x[2].size(1) for x in batch])
+        max_audio_token_len = max([x[3].size(1) for x in batch])
 
         text_lengths = torch.LongTensor(len(batch))
         spec_lengths = torch.LongTensor(len(batch))
         wav_lengths = torch.LongTensor(len(batch))
+        audio_token_lengths = torch.LongTensor(len(batch))
 
         text_padded = torch.LongTensor(len(batch), max_text_len)
         spec_padded = torch.FloatTensor(len(batch), batch[0][1].size(0), max_spec_len)
         wav_padded = torch.FloatTensor(len(batch), 1, max_wav_len)
+        audio_tokens_padded = torch.LongTensor(len(batch), batch[0][3].size(0), max_audio_token_len)
+        
         text_padded.zero_()
         spec_padded.zero_()
         wav_padded.zero_()
+        audio_tokens_padded.zero_()
+        
         for i in range(len(ids_sorted_decreasing)):
             row = batch[ids_sorted_decreasing[i]]
 
@@ -142,10 +156,15 @@ class TextAudioCollate():
             wav = row[2]
             wav_padded[i, :, :wav.size(1)] = wav
             wav_lengths[i] = wav.size(1)
+            
+            audio_tokens = row[3]
+            audio_tokens_padded[i, :, :audio_tokens.size(1)] = audio_tokens
+            audio_token_lengths[i] = audio_tokens.size(1)
 
         if self.return_ids:
-            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, ids_sorted_decreasing
-        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths
+            return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, audio_tokens_padded, audio_token_lengths, ids_sorted_decreasing
+        return text_padded, text_lengths, spec_padded, spec_lengths, wav_padded, wav_lengths, audio_tokens_padded, audio_token_lengths
+
 
 
 """Multi speaker version"""

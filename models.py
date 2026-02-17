@@ -600,18 +600,32 @@ class LLMSynthesizer(nn.Module):
     self.token_proj = nn.Linear(512, inter_channels)
 
   def forward(self, text_tokens, audio_tokens):
-    # LLM이 다음 오디오 토큰 예측
+    # LLM이 다음 오디오 토큰 예측 (Training용)
+    # audio_tokens: [batch, n_codebooks, seq_len]
     logits = self.llm(text_tokens, audio_tokens)
     return logits
 
-  def infer(self, text_tokens, audio_tokens):
-    # LLM으로 생성된 토큰을 MB-iSTFT 디코더로 소리 합성
-    # 실제로는 AR 생성이 필요하지만 구조 통합 예시로 작성
-    x = self.llm.text_emb(text_tokens) 
-    # ... 토큰 생성 로직 ...
-    # 생성된 특징벡터(예: h)를 디코더에 전달
+  def infer(self, text_tokens, audio_tokens=None, g=None):
+    # 실제 추론 또는 Teacher-Forced Decoding
+    # 여기서는 단순화를 위해 입력된 오디오 토큰의 특징을 추출하여 디코더로 전달하는 구조
+    # (실제 LLM-TTS는 여기서 Autoregressive하게 토큰을 하나씩 생성해야 함)
+    
+    # 1. LLM의 중간 특징량 추출 (텍스트와 오디오 결합 상태)
+    t_emb = self.llm.text_emb(text_tokens)
+    a_emb = 0
+    if audio_tokens is not None:
+        for i in range(self.llm.n_codebooks):
+            a_emb += self.llm.audio_embs[i](audio_tokens[:, i, :])
+    
+    # 텍스트와 오디오 임베딩을 합쳐서 컨텍스트 생성
+    # (간단한 예시로 텍스트 임베딩만 혹은 합산 사용)
+    x = t_emb if audio_tokens is None else (t_emb.mean(1, keepdim=True) + a_emb)
+    
+    # 2. Generator 입력 채널에 맞게 변환 [B, seq, dim] -> [B, dim, seq]
     z = self.token_proj(x).transpose(1, 2)
-    o, o_mb = self.dec(z)
+    
+    # 3. MB-iSTFT Generator를 통한 음성 합성
+    o, o_mb = self.dec(z, g=g)
     return o, o_mb
 
 class SynthesizerTrn(nn.Module):
