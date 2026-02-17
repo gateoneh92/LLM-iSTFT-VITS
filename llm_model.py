@@ -8,6 +8,7 @@ class AudioTextTransformer(nn.Module):
                  n_text_vocab, 
                  n_audio_vocab, 
                  n_codebooks=8,
+                 n_speakers=0, # 추가: 멀티 스피커 지원
                  d_model=512, 
                  nhead=8, 
                  num_layers=12, 
@@ -19,32 +20,41 @@ class AudioTextTransformer(nn.Module):
         
         # 텍스트 및 오디오 토큰 임베딩
         self.text_emb = nn.Embedding(n_text_vocab, d_model)
-        # EnCodec 같은 멀티 코드북 대응을 위해 리스트로 구성
         self.audio_embs = nn.ModuleList([nn.Embedding(n_audio_vocab + 1, d_model) for _ in range(n_codebooks)])
         
+        # 추가: 스피커 임베딩
+        if n_speakers > 0:
+            self.spk_emb = nn.Embedding(n_speakers, d_model)
+        else:
+            self.spk_emb = None
+
         self.pos_encoder = PositionalEncoding(d_model, dropout)
         
         # GPT 스타일의 Decoder-only Transformer
         decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, batch_first=True)
         self.transformer = nn.TransformerDecoder(decoder_layer, num_layers)
         
-        # 다음 토큰 예측을 위한 헤드 (첫 번째 코드북 중심 예시)
         self.audio_head = nn.Linear(d_model, n_audio_vocab)
         
-    def forward(self, text_tokens, audio_tokens, audio_mask=None):
+    def forward(self, text_tokens, audio_tokens, sid=None):
         # text_tokens: [batch, text_len]
         # audio_tokens: [batch, n_codebooks, audio_len]
+        # sid: [batch] (Speaker ID)
         
-        t_emb = self.text_emb(text_tokens) # [batch, text_len, d_model]
+        t_emb = self.text_emb(text_tokens) 
         
-        # 여러 코드북의 임베딩을 합산 (또는 concat 후 projection 가능)
         a_emb = 0
         for i in range(self.n_codebooks):
             a_emb += self.audio_embs[i](audio_tokens[:, i, :])
-        # a_emb: [batch, audio_len, d_model]
         
         # 입력 결합: [Text] + [Audio]
         x = torch.cat([t_emb, a_emb], dim=1)
+        
+        # 스피커 정보가 있다면 모든 토큰에 더해줌 (Global Conditioning)
+        if self.spk_emb is not None and sid is not None:
+            s_emb = self.spk_emb(sid).unsqueeze(1) # [batch, 1, d_model]
+            x = x + s_emb
+            
         x = self.pos_encoder(x)
         
         # Causal mask 생성

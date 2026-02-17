@@ -581,6 +581,7 @@ class LLMSynthesizer(nn.Module):
     gen_istft_n_fft,
     gen_istft_hop_size,
     subbands,
+    n_speakers=0, # 멀티 스피커 정보 추가
     mb_istft_vits=True,
     gin_channels=0,
     **kwargs):
@@ -588,7 +589,7 @@ class LLMSynthesizer(nn.Module):
     
     # LLM Part
     from llm_model import AudioTextTransformer
-    self.llm = AudioTextTransformer(n_text_vocab, n_audio_vocab, n_codebooks)
+    self.llm = AudioTextTransformer(n_text_vocab, n_audio_vocab, n_codebooks, n_speakers=n_speakers)
     
     # Decoder Part (From MB-iSTFT-VITS)
     self.dec = Multiband_iSTFT_Generator(
@@ -599,16 +600,14 @@ class LLMSynthesizer(nn.Module):
     # 토큰 임베딩을 Generator 입력 채널에 맞추는 프로젝션
     self.token_proj = nn.Linear(512, inter_channels)
 
-  def forward(self, text_tokens, audio_tokens):
+  def forward(self, text_tokens, audio_tokens, sid=None):
     # LLM이 다음 오디오 토큰 예측 (Training용)
     # audio_tokens: [batch, n_codebooks, seq_len]
-    logits = self.llm(text_tokens, audio_tokens)
+    logits = self.llm(text_tokens, audio_tokens, sid=sid)
     return logits
 
-  def infer(self, text_tokens, audio_tokens=None, g=None):
+  def infer(self, text_tokens, audio_tokens=None, sid=None, g=None):
     # 실제 추론 또는 Teacher-Forced Decoding
-    # 여기서는 단순화를 위해 입력된 오디오 토큰의 특징을 추출하여 디코더로 전달하는 구조
-    # (실제 LLM-TTS는 여기서 Autoregressive하게 토큰을 하나씩 생성해야 함)
     
     # 1. LLM의 중간 특징량 추출 (텍스트와 오디오 결합 상태)
     t_emb = self.llm.text_emb(text_tokens)
@@ -617,9 +616,11 @@ class LLMSynthesizer(nn.Module):
         for i in range(self.llm.n_codebooks):
             a_emb += self.llm.audio_embs[i](audio_tokens[:, i, :])
     
-    # 텍스트와 오디오 임베딩을 합쳐서 컨텍스트 생성
-    # (간단한 예시로 텍스트 임베딩만 혹은 합산 사용)
+    # 스피커 임베딩 반영
     x = t_emb if audio_tokens is None else (t_emb.mean(1, keepdim=True) + a_emb)
+    if self.llm.spk_emb is not None and sid is not None:
+        s_emb = self.llm.spk_emb(sid).unsqueeze(1)
+        x = x + s_emb
     
     # 2. Generator 입력 채널에 맞게 변환 [B, seq, dim] -> [B, dim, seq]
     z = self.token_proj(x).transpose(1, 2)
