@@ -85,4 +85,3 @@ python3 test_llm_repo.py
 - [Official VITS](https://github.com/jaywalnut310/vits)
 - [Meta EnCodec](https://github.com/facebookresearch/encodec)
 
-**Developed for 성웅왕자님 by 정화 🌸**
