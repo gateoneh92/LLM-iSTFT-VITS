@@ -48,15 +48,18 @@ def llm_loss(logits, targets):
 
 def main():
   """Assume Single Node Multi GPUs Training Only"""
-  assert torch.cuda.is_available(), "CPU training is not allowed."
+  # assert torch.cuda.is_available(), "CPU training is not allowed."
 
-  n_gpus = torch.cuda.device_count()
+  n_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 1
   os.environ['MASTER_ADDR'] = 'localhost'
   os.environ['MASTER_PORT'] = '65520'
 #   n_gpus = 1
 
   hps = utils.get_hparams()
-  mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
+  if n_gpus > 1:
+    mp.spawn(run, nprocs=n_gpus, args=(n_gpus, hps,))
+  else:
+    run(0, n_gpus, hps)
 
 
 def run(rank, n_gpus, hps):
@@ -68,9 +71,7 @@ def run(rank, n_gpus, hps):
     writer = SummaryWriter(log_dir=hps.model_dir)
     writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
 
-  dist.init_process_group(backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
-  torch.manual_seed(hps.train.seed)
-  torch.cuda.set_device(rank)
+  device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
 
   train_dataset = TextAudioLoader(hps.data.training_files, hps.data)
   train_sampler = DistributedBucketSampler(
@@ -81,7 +82,7 @@ def run(rank, n_gpus, hps):
       rank=rank,
       shuffle=True)
   collate_fn = TextAudioCollate()
-  train_loader = DataLoader(train_dataset, num_workers=8, shuffle=False, pin_memory=True,
+  train_loader = DataLoader(train_dataset, num_workers=0, shuffle=False, pin_memory=True,
       collate_fn=collate_fn, batch_sampler=train_sampler)
   if rank == 0:
     eval_dataset = TextAudioLoader(hps.data.validation_files, hps.data)
@@ -105,9 +106,9 @@ def run(rank, n_gpus, hps):
       gen_istft_hop_size=hps.model.gen_istft_hop_size,
       subbands=hps.model.subbands,
       gin_channels=hps.model.gin_channels
-  ).cuda(rank)
+  ).to(device)
   
-  net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).cuda(rank)
+  net_d = MultiPeriodDiscriminator(hps.model.use_spectral_norm).to(device)
   optim_g = torch.optim.AdamW(
       net_g.parameters(), 
       hps.train.learning_rate, 
@@ -118,8 +119,10 @@ def run(rank, n_gpus, hps):
       hps.train.learning_rate, 
       betas=hps.train.betas, 
       eps=hps.train.eps)
-  net_g = DDP(net_g, device_ids=[rank])
-  net_d = DDP(net_d, device_ids=[rank])
+  
+  if n_gpus > 1:
+    net_g = DDP(net_g, device_ids=[rank])
+    net_d = DDP(net_d, device_ids=[rank])
 
   try:
     _, _, _, epoch_str = utils.load_checkpoint(utils.latest_checkpoint_path(hps.model_dir, "G_*.pth"), net_g, optim_g)
@@ -136,15 +139,15 @@ def run(rank, n_gpus, hps):
 
   for epoch in range(epoch_str, hps.train.epochs + 1):
     if rank==0:
-      train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [scheduler_g, scheduler_d], scaler, [train_loader, eval_loader], logger, [writer, writer_eval])
+      train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [scheduler_g, scheduler_d], scaler, [train_loader, eval_loader], logger, [writer, writer_eval], device, n_gpus)
     else:
-      train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [scheduler_g, scheduler_d], scaler, [train_loader, None], None, None)
+      train_and_evaluate(rank, epoch, hps, [net_g, net_d], [optim_g, optim_d], [scheduler_g, scheduler_d], scaler, [train_loader, None], None, None, device, n_gpus)
     scheduler_g.step()
     scheduler_d.step()
 
 
 
-def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers):
+def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loaders, logger, writers, device, n_gpus):
   net_g, net_d = nets
   optim_g, optim_d = optims
   scheduler_g, scheduler_d = schedulers
@@ -158,10 +161,10 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
   net_g.train()
   net_d.train()
   for batch_idx, (x, x_lengths, spec, spec_lengths, y, y_lengths, audio_tokens, audio_token_lengths) in enumerate(train_loader):
-    x, x_lengths = x.cuda(rank, non_blocking=True), x_lengths.cuda(rank, non_blocking=True)
-    spec, spec_lengths = spec.cuda(rank, non_blocking=True), spec_lengths.cuda(rank, non_blocking=True)
-    y, y_lengths = y.cuda(rank, non_blocking=True), y_lengths.cuda(rank, non_blocking=True)
-    audio_tokens = audio_tokens.cuda(rank, non_blocking=True)
+    x, x_lengths = x.to(device, non_blocking=True), x_lengths.to(device, non_blocking=True)
+    spec, spec_lengths = spec.to(device, non_blocking=True), spec_lengths.to(device, non_blocking=True)
+    y, y_lengths = y.to(device, non_blocking=True), y_lengths.to(device, non_blocking=True)
+    audio_tokens = audio_tokens.to(device, non_blocking=True)
 
     with autocast(enabled=hps.train.fp16_run):
       # LLMSynthesizer forward: 오디오 토큰 예측
@@ -169,7 +172,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       
       # VITS 디코더 부분 학습을 위한 오디오 합성 (Teacher Forcing 스타일)
       # 실제로는 LLM 출력을 디코더에 연결하는 로직이 모델 내부에 있어야 함
-      y_hat, y_hat_mb = net_g.module.infer(x, audio_tokens)
+      y_hat, y_hat_mb = net_g.module.infer(x, audio_tokens) if n_gpus > 1 else net_g.infer(x, audio_tokens)
 
       mel = spec_to_mel_torch(
           spec, 
@@ -178,6 +181,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
           hps.data.sampling_rate,
           hps.data.mel_fmin, 
           hps.data.mel_fmax)
+      
+      # 로깅용 y_mel 정의
+      y_mel = mel 
       
       # 슬라이싱 대신 전체 길이로 예시 (실제로는 최적화 필요)
       y_hat_mel = mel_spectrogram_torch(
@@ -192,7 +198,9 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
       )
 
       # Discriminator 학습
-      y_d_hat_r, y_d_hat_g, _, _ = net_d(y, y_hat.detach())
+      # 길이 맞추기
+      min_wav_len = min(y.size(-1), y_hat.size(-1))
+      y_d_hat_r, y_d_hat_g, _, _ = net_d(y[:,:,:min_wav_len], y_hat[:,:,:min_wav_len].detach())
       with autocast(enabled=False):
         loss_disc, losses_disc_r, losses_disc_g = discriminator_loss(y_d_hat_r, y_d_hat_g)
         loss_disc_all = loss_disc
@@ -204,13 +212,15 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
 
     with autocast(enabled=hps.train.fp16_run):
       # Generator & LLM 학습
-      y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y, y_hat)
+      y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = net_d(y[:,:,:min_wav_len], y_hat[:,:,:min_wav_len])
       with autocast(enabled=False):
         # 1. LLM Loss (어휘 예측)
         loss_llm_val = llm_loss(audio_logits, audio_tokens[:, 0, 1:]) # 다음 토큰 예측
         
         # 2. VITS Decoder Losses
-        loss_mel = F.l1_loss(mel, y_hat_mel) * hps.train.c_mel
+        # 길이 맞추기 (STFT 패딩 차이로 인해 발생 가능)
+        min_len = min(mel.size(-1), y_hat_mel.size(-1))
+        loss_mel = F.l1_loss(mel[:,:,:min_len], y_hat_mel[:,:,:min_len]) * hps.train.c_mel
         loss_fm = feature_loss(fmap_r, fmap_g)
         loss_gen, losses_gen = generator_loss(y_d_hat_g)
         
@@ -234,14 +244,14 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
     if rank==0:
       if global_step % hps.train.log_interval == 0:
         lr = optim_g.param_groups[0]['lr']
-        losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_dur, loss_kl, loss_subband]
+        losses = [loss_disc, loss_gen, loss_fm, loss_mel, loss_llm_val, loss_subband]
         logger.info('Train Epoch: {} [{:.0f}%]'.format(
           epoch,
           100. * batch_idx / len(train_loader)))
         logger.info([x.item() for x in losses] + [global_step, lr])
         
         scalar_dict = {"loss/g/total": loss_gen_all, "loss/d/total": loss_disc_all, "learning_rate": lr, "grad_norm_d": grad_norm_d, "grad_norm_g": grad_norm_g}
-        scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/dur": loss_dur, "loss/g/kl": loss_kl, "loss/g/subband": loss_subband})
+        scalar_dict.update({"loss/g/fm": loss_fm, "loss/g/mel": loss_mel, "loss/g/llm": loss_llm_val, "loss/g/subband": loss_subband})
 
         scalar_dict.update({"loss/g/{}".format(i): v for i, v in enumerate(losses_gen)})
         scalar_dict.update({"loss/d_r/{}".format(i): v for i, v in enumerate(losses_disc_r)})
@@ -250,7 +260,7 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
             "slice/mel_org": utils.plot_spectrogram_to_numpy(y_mel[0].data.cpu().numpy()),
             "slice/mel_gen": utils.plot_spectrogram_to_numpy(y_hat_mel[0].data.cpu().numpy()), 
             "all/mel": utils.plot_spectrogram_to_numpy(mel[0].data.cpu().numpy()),
-            "all/attn": utils.plot_alignment_to_numpy(attn[0,0].data.cpu().numpy())
+            # "all/attn": utils.plot_alignment_to_numpy(attn[0,0].data.cpu().numpy())
         }
         utils.summarize(
           writer=writer,

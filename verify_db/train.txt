@@ -1,0 +1,2 @@
+/Users/sw/.openclaw/workspace/MB-iSTFT-VITS/verify_db/wavs/1.wav|This is a test sentence one.
+/Users/sw/.openclaw/workspace/MB-iSTFT-VITS/verify_db/wavs/2.wav|The quick brown fox jumps over the lazy dog.

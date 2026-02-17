@@ -14,7 +14,15 @@ class AudioTokenizer:
 
     def encode(self, audio_path):
         """음성 파일을 토큰으로 변환합니다."""
-        wav, sr = torchaudio.load(audio_path)
+        from scipy.io import wavfile
+        sr, wav = wavfile.read(audio_path)
+        wav = torch.from_numpy(wav).float()
+        if len(wav.shape) == 1:
+            wav = wav.unsqueeze(0)
+        # Normalize if needed
+        if wav.abs().max() > 1.0:
+            wav = wav / 32768.0
+            
         wav = convert_audio(wav, sr, self.sample_rate, self.model.channels)
         wav = wav.unsqueeze(0).to(self.device)
 
