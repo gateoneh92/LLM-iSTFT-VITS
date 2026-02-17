@@ -14,6 +14,24 @@ Next-Generation Lightweight LLM-based Text-to-Speech System.
 
 ---
 
+## 🆚 MB-iSTFT-VITS와의 차이점 (Differences)
+
+기존 **MB-iSTFT-VITS**는 빠르고 가벼운 TTS 모델이지만, 긴 문맥이나 미세한 감정 표현에는 한계가 있었습니다.
+**LLM-iSTFT-VITS**는 이를 보완하기 위해 **LLM(Large Language Model)의 접근 방식**을 도입했습니다.
+
+| 특징 | 기존 MB-iSTFT-VITS | 🌸 LLM-iSTFT-VITS (This Repo) |
+| :--- | :--- | :--- |
+| **핵심 구조 (Core Arch)** | VITS (VAE + Flow + GAN) | **Transformer (GPT-style LLM) + VITS Decoder** |
+| **입력 처리 (Input)** | Phoneme → Waveform (End-to-End) | **Text Tokens + Audio Tokens (Sequence-to-Sequence)** |
+| **오디오 표현 (Audio Rep)** | Linear / Mel Spectrogram | **EnCodec Discrete Tokens (Neural Codec)** |
+| **문맥 이해 (Context)** | 문장 단위 (Local Context) | **긴 시퀀스 및 문맥 기반 (Global Context)** |
+| **장점 (Pros)** | 매우 빠름, 가벼움 | **더 자연스러운 운율, 감정 표현, In-Context Learning 가능성** |
+| **학습 방식 (Training)** | Monotonic Alignment Search (MAS) | **Next Token Prediction (Auto-regressive) + GAN Finetuning** |
+
+> **요약**: 이 프로젝트는 **LLM의 뛰어난 문맥 이해력**과 **MB-iSTFT-VITS의 초고속 발성 능력**을 하이브리드로 결합한 차세대 모델입니다.
+
+---
+
 ## 🛠️ 설치 방법 (Installation)
 
 ### 1. 가상 환경 설정 및 패키지 설치
@@ -85,3 +103,4 @@ python3 test_llm_repo.py
 - [Official VITS](https://github.com/jaywalnut310/vits)
 - [Meta EnCodec](https://github.com/facebookresearch/encodec)
 
+**Developed for 성웅왕자님 by 정화 🌸**
