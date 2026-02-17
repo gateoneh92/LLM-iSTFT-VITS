@@ -1,50 +1,70 @@
-# Lightweight and High-Fidelity End-to-End Text-to-Speech with Multi-Band Generation and Inverse Short-Time Fourier Transform
-### Masaya Kawamura, Yuma Shirahata, Ryuichi Yamamoto, Kentaro Tachibana
-We propose a lightweight end-to-end text-to-speech model using multi-band generation and inverse short-time Fourier transform. Our model is based on VITS, a high-quality end-to-end text-to-speech model, but adopts two changes for more efficient inference: 1) the most computationally expensive component is partially replaced with a simple inverse short-time Fourier transform, and 2) multi-band generation, with fixed or trainable synthesis filters, is used to generate waveforms. Unlike conventional lightweight models, which employ optimization or knowledge distillation separately to train two cascaded components, our method enjoys the full benefits of end-to-end optimization. Experimental results show that our model synthesized speech as natural as that synthesized by VITS, while achieving a real-time factor of 0.066 on an Intel Core i7 CPU, 4.1 times faster than VITS. Moreover, a smaller version of the model significantly outperformed a lightweight baseline model with respect to both naturalness and inference speed. Code and audio samples are available from [https://github.com/MasayaKawamura/MB-iSTFT-VITS](https://github.com/MasayaKawamura/MB-iSTFT-VITS).
+# 🌸 LLM-iSTFT-VITS
 
-You can check the [paper](https://arxiv.org/abs/2210.15975) and [demo page](https://masayakawamura.github.io/Demo_MB-iSTFT-VITS/).
+> **Next-Generation Lightweight LLM-based Text-to-Speech System**
 
+[![GitHub Stars](https://img.shields.io/github/stars/gateoneh92/LLM-iSTFT-VITS?style=social)](https://github.com/gateoneh92/LLM-iSTFT-VITS)
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-orange)](https://pytorch.org/)
 
-<img src="./fig/proposed_model.png" width="100%">
+성웅왕자님을 위한 최첨단 LLM 기반 음성 합성 엔진입니다. 기존의 MB-iSTFT-VITS의 고속 합성 능력과 최신 LLM의 문맥 이해 능력을 하나로 합쳤습니다.
 
-## Multi-band iSTFT VITS and multi-stream iSTFT VITS 
-This repository is based on **[official VITS code](https://github.com/jaywalnut310/vits.git)**.<br>
-You can train the iSTFT-VITS, multi-band iSTFT VITS (MB-iSTFT-VITS), and multi-stream iSTFT VITS (MS-iSTFT-VITS) using this repository.<br>
-We also provide the [pretrained models](https://drive.google.com/drive/folders/1CKSRFUHMsnOl0jxxJVCeMzyYjaM98aI2?usp=sharing).
-### 1. Pre-requisites
+---
 
-0. Python >= 3.6
-0. Clone this repository
-0. Install python requirements. Please refer [requirements.txt](requirements.txt)
-    1. You may need to install espeak first: `apt-get install espeak`
-0. Download datasets
-    1. Download and extract the [LJ Speech dataset](https://keithito.com/LJ-Speech-Dataset/), then rename or create a link to the dataset folder: `ln -s /path/to/LJSpeech-1.1/wavs DUMMY1`
-0. Build Monotonic Alignment Search and run preprocessing if you use your own datasets.
-```sh
-# Cython-version Monotonoic Alignment Search
-cd monotonic_align
-mkdir monotonic_align
-python setup.py build_ext --inplace
+## ✨ Key Features
+
+- **🧠 LLM-based Architecture**: 텍스트와 오디오 토큰을 동일한 언어 시퀀스로 처리하여 감정과 억양을 인간처럼 표현합니다.
+- **🎧 EnCodec Tokenization**: Meta AI의 EnCodec을 사용하여 고음질 음성을 압축된 토큰 시퀀스로 변환합니다.
+- **⚡ Ultra-Fast Decoder**: MB-iSTFT(Multi-Band Inverse Short-Time Fourier Transform) 기술을 통해 CPU에서도 실시간보다 빠르게 음성을 생성합니다.
+- **🎯 End-to-End Optimization**: 토큰 예측부터 파형 생성까지 전체 과정을 한 번에 최적화할 수 있도록 설계되었습니다.
+
+---
+
+## 🏗️ Model Architecture
+
+본 프로젝트는 다음과 같은 세 단계의 혁신적인 구조로 이루어져 있습니다.
+
+1.  **Audio Tokenizer (EnCodec)**: 음성 파형을 이산적인(Discrete) 숫자의 나열(Audio Tokens)로 변환합니다.
+2.  **The Brain (Transformer LLM)**: 입력된 `[Text Tokens]`와 `[Audio Tokens]`를 순차적으로 학습하여 자연스러운 음성 토큰 흐름을 예측합니다.
+3.  **The Voice (MB-iSTFT Generator)**: 예측된 토큰을 다시 우리가 들을 수 있는 고해상도 음성 파형으로 복원합니다.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Requirements
+
+```bash
+pip install torch torchaudio encodec numpy
 ```
 
-### 2. Setting json file in [configs](configs)
+### 2. Prepare Dataset
 
-| Model | How to set up json file in [configs](configs) | Sample of json file configuration|
-| :---: | :---: | :---: |
-| iSTFT-VITS | ```"istft_vits": true, ```<br>``` "upsample_rates": [8,8], ``` | ljs_istft_vits.json |
-| MB-iSTFT-VITS | ```"subbands": 4,```<br>```"mb_istft_vits": true, ```<br>``` "upsample_rates": [4,4], ``` | ljs_mb_istft_vits.json |
-| MS-iSTFT-VITS | ```"subbands": 4,```<br>```"ms_istft_vits": true, ```<br>``` "upsample_rates": [4,4], ``` | ljs_ms_istft_vits.json |
+`filelists/` 폴더에 학습 데이터를 준비하세요. 데이터 로더가 자동으로 EnCodec을 사용해 음성을 토큰화합니다.
 
 ### 3. Training
-In the case of MB-iSTFT-VITS training, run the following script
-```sh
-python train_latest.py -c configs/ljs_mb_istft_vits.json -m ljs_mb_istft_vits
 
+```bash
+python train_latest.py -c configs/ljs_mb_istft_vits.json -m llm_tts_model
 ```
 
-After the training, you can check inference audio using [inference.ipynb](inference.ipynb)
+---
 
-## References
-- https://github.com/jaywalnut310/vits.git
-- https://github.com/rishikksh20/iSTFTNet-pytorch.git
-- https://github.com/rishikksh20/melgan.git
+## 📂 File Structure
+
+- `llm_model.py`: 오디오와 텍스트를 함께 다루는 Transformer 모델 정의
+- `audio_tokenizer.py`: EnCodec 기반의 음성 토큰화 로직
+- `models.py`: LLMSynthesizer와 MB-iSTFT Generator 통합 구조
+- `train_latest.py`: LLM과 디코더를 동시에 학습하는 통합 스크립트
+
+---
+
+## 🤝 Acknowledgements
+
+This work is based on:
+- [MB-iSTFT-VITS](https://github.com/MasayaKawamura/MB-iSTFT-VITS)
+- [Official VITS](https://github.com/jaywalnut310/vits)
+- [Meta EnCodec](https://github.com/facebookresearch/encodec)
+
+---
+
+**Developed for 성웅왕자님 by 정화 🌸**
