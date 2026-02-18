@@ -1,52 +1,53 @@
 # 🌸 LLM-iSTFT-VITS
 
 Next-Generation Lightweight LLM-based Text-to-Speech System.
-이 프로젝트는 MB-iSTFT-VITS의 고속 합성 능력과 최신 LLM의 문맥 이해 능력을 결합한 최첨단 TTS 엔진입니다.
+
+This project combines the fast synthesis capabilities of MB-iSTFT-VITS with the advanced contextual understanding of modern LLMs to create a cutting-edge TTS engine.
 
 ---
 
-## 🚀 주요 특징 (Key Features)
+## 🚀 Key Features
 
-- **🧠 LLM-기반 구조**: Transformer를 사용하여 텍스트와 오디오 토큰을 시퀀스로 처리, 자연스러운 감정과 억양 표현.
-- **🎧 EnCodec 토큰화**: Meta AI의 EnCodec을 통해 고음질 음성을 압축된 토큰 시퀀스로 변환 및 학습.
-- **⚡ 초고속 디코딩**: MB-iSTFT 기술을 채택하여 CPU에서도 실시간보다 수십 배 빠른 음성 생성 가능.
-- **📈 전이 학습(Transfer Learning) 지원**: 프리트레인드 디코더 가중치를 로드하여 적은 데이터로도 빠르게 고품질 학습 가능.
+- **🧠 LLM-Based Architecture**: Uses Transformer to process text and audio tokens as sequences, enabling natural emotion and prosody expression.
+- **🎧 EnCodec Tokenization**: Leverages Meta AI's EnCodec to convert high-quality speech into compressed token sequences for efficient learning.
+- **⚡ Ultra-Fast Decoding**: Adopts MB-iSTFT technology to achieve speech generation dozens of times faster than real-time, even on CPU.
+- **📈 Transfer Learning Support**: Load pretrained decoder weights to achieve high-quality results quickly with minimal data.
 
 ---
 
-## 🆚 MB-iSTFT-VITS와의 차이점 (Differences)
+## 🆚 Differences from MB-iSTFT-VITS
 
-기존 **MB-iSTFT-VITS**는 빠르고 가벼운 TTS 모델이지만, 긴 문맥이나 미세한 감정 표현에는 한계가 있었습니다.
-**LLM-iSTFT-VITS**는 이를 보완하기 위해 **LLM(Large Language Model)의 접근 방식**을 도입했습니다.
+While the original **MB-iSTFT-VITS** is a fast and lightweight TTS model, it has limitations in handling long contexts and expressing subtle emotions.
+**LLM-iSTFT-VITS** addresses these limitations by adopting an **LLM (Large Language Model) approach**.
 
-| 특징 | 기존 MB-iSTFT-VITS | 🌸 LLM-iSTFT-VITS (This Repo) |
+| Aspect | Original MB-iSTFT-VITS | 🌸 LLM-iSTFT-VITS (This Repo) |
 | :--- | :--- | :--- |
-| **핵심 구조 (Core Arch)** | VITS (VAE + Flow + GAN) | **Transformer (GPT-style LLM) + VITS Decoder** |
-| **입력 처리 (Input)** | Phoneme → Waveform (End-to-End) | **Text Tokens + Audio Tokens (Sequence-to-Sequence)** |
-| **오디오 표현 (Audio Rep)** | Linear / Mel Spectrogram | **EnCodec Discrete Tokens (Neural Codec)** |
-| **문맥 이해 (Context)** | 문장 단위 (Local Context) | **긴 시퀀스 및 문맥 기반 (Global Context)** |
-| **장점 (Pros)** | 매우 빠름, 가벼움 | **더 자연스러운 운율, 감정 표현, In-Context Learning 가능성** |
-| **학습 방식 (Training)** | Monotonic Alignment Search (MAS) | **Next Token Prediction (Auto-regressive) + GAN Finetuning** |
+| **Core Architecture** | VITS (VAE + Flow + GAN) | **Transformer (GPT-style LLM) + VITS Decoder** |
+| **Input Processing** | Phoneme → Waveform (End-to-End) | **Text Tokens + Audio Tokens (Sequence-to-Sequence)** |
+| **Audio Representation** | Linear / Mel Spectrogram | **EnCodec Discrete Tokens (Neural Codec)** |
+| **Context Understanding** | Sentence-level (Local Context) | **Long Sequences & Context-based (Global Context)** |
+| **Strengths** | Very fast, lightweight | **More natural prosody, emotion expression, In-Context Learning potential** |
+| **Training Method** | Monotonic Alignment Search (MAS) | **Next Token Prediction (Auto-regressive) + GAN Finetuning** |
 
-> **요약**: 이 프로젝트는 **LLM의 뛰어난 문맥 이해력**과 **MB-iSTFT-VITS의 초고속 발성 능력**을 하이브리드로 결합한 차세대 모델입니다.
+> **Summary**: This project combines the **superior contextual understanding of LLMs** with the **ultra-fast synthesis capabilities of MB-iSTFT-VITS** in a hybrid next-generation model.
 
 ---
 
-## 🛠️ 설치 방법 (Installation)
+## 🛠️ Installation
 
-### 1. 가상 환경 설정 및 패키지 설치
+### 1. Virtual Environment Setup & Package Installation
 ```bash
-# 가상 환경 생성
+# Create virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
-# 필수 라이브러리 설치
+# Install required packages
 pip install -U pip
 pip install torch torchaudio encodec numpy scipy matplotlib tensorboard cython librosa phonemizer unidecode
 ```
 
-### 2. Monotonic Alignment 빌드 (필수)
-학습 및 추론을 위해 Cython 코드를 빌드해야 합니다.
+### 2. Build Monotonic Alignment (Required)
+You need to build the Cython code for training and inference.
 ```bash
 cd monotonic_align
 python3 setup.py build_ext --inplace
@@ -55,46 +56,46 @@ cd ..
 
 ---
 
-## 📂 데이터 준비 (Dataset Preparation)
+## 📂 Dataset Preparation
 
-1.  `wavs/` 폴더에 학습용 오디오 파일(.wav, 22050Hz 권장)을 준비합니다.
-2.  `filelists/` 폴더에 학습용 목록 파일을 만듭니다. (형식: `파일절대경로|텍스트`)
-    *   예: `/path/to/audio.wav|This is a sample sentence.`
+1. Prepare training audio files (.wav, 22050Hz recommended) in the `wavs/` folder.
+2. Create a file list in the `filelists/` folder. (Format: `absolute_file_path|text`)
+   - Example: `/path/to/audio.wav|This is a sample sentence.`
 
 ---
 
-## 🏋️ 학습 방법 (Training)
+## 🏋️ Training
 
-학습 시 프리트레인드 디코더(MB-iSTFT-VITS)를 사용하면 훨씬 빠르게 성능을 올릴 수 있습니다.
+Using a pretrained decoder (MB-iSTFT-VITS) during training can significantly speed up performance improvement.
 
-### 프리트레인드 모델로 시작하기 (추천)
+### Starting with a Pretrained Model (Recommended)
 ```bash
 python3 train_latest.py \
   -c configs/ljs_mb_istft_vits.json \
-  -m [모델이름] \
+  -m [model_name] \
   -p pretrained/pretrained_MB-iSTFT-VITS_ddp.pth
 ```
-*   `-p`: 프리트레인드 디코더 가중치 경로를 지정합니다. (자동으로 디코더 부분만 이식됩니다.)
+* `-p`: Specify the path to the pretrained decoder weights. (The decoder part will be automatically transferred.)
 
-### 처음부터 학습하기
+### Training from Scratch
 ```bash
-python3 train_latest.py -c configs/ljs_mb_istft_vits.json -m [모델이름]
+python3 train_latest.py -c configs/ljs_mb_istft_vits.json -m [model_name]
 ```
 
 ---
 
-## 🎙️ 합성 방법 (Inference / Synthesis)
+## 🎙️ Inference / Synthesis
 
-학습된 체크포인트 또는 프리트레인드 모델을 사용하여 음성을 합성합니다.
+Use trained checkpoints or pretrained models to synthesize speech.
 
-### 1. 테스트 스크립트 활용
-`test_llm_repo.py`를 수정하여 원하는 텍스트를 입력하고 실행합니다.
+### 1. Using Test Scripts
+Modify `test_llm_repo.py` with your desired text and run:
 ```bash
 python3 test_llm_repo.py
 ```
 
-### 2. Jupyter Notebook 활용
-`inference.ipynb`를 열어 대화형으로 음성을 합성하고 결과를 즉시 확인할 수 있습니다.
+### 2. Using Jupyter Notebook
+Open `inference.ipynb` for interactive speech synthesis and real-time result verification.
 
 ---
 
