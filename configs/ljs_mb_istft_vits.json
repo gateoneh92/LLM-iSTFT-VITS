@@ -61,7 +61,8 @@
     "use_sdp": false,
     "n_text_vocab": 200,
     "n_audio_vocab": 1024,
-    "n_codebooks": 8
+    "n_codebooks": 8,
+    "gin_channels": 0
   }
 
 }
