@@ -12,6 +12,15 @@ def feature_loss(fmap_r, fmap_g):
     for rl, gl in zip(dr, dg):
       rl = rl.float().detach()
       gl = gl.float()
+
+      # Match all dimensions
+      if rl.shape != gl.shape:
+        # Match each dimension to the minimum size
+        min_shape = [min(rl.size(i), gl.size(i)) for i in range(len(rl.shape))]
+        slices = tuple(slice(0, s) for s in min_shape)
+        rl = rl[slices]
+        gl = gl[slices]
+
       loss += torch.mean(torch.abs(rl - gl))
 
   return loss * 2 
