@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Git
+.git/
+.gitignore
+
+# Logs and checkpoints
+logs/
+checkpoints/
+*.pth
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Pretrained models (download separately)
+pretrained_llm/
+encodec_pretrained/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+monotonic_align/build/
+
+# Data files
+*.wav
+*.mp3
+*.flac
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Requirements
+requirements_full.txt

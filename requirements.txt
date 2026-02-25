@@ -1,10 +1,27 @@
-Cython==0.29.21
-librosa==0.8.0
-matplotlib==3.3.1
-numpy==1.18.5
-phonemizer==2.2.1
-scipy==1.5.2
-tensorboard==2.3.0
-torch==1.6.0
-torchvision==0.7.0
-Unidecode==1.1.1
+# Core ML frameworks
+torch==2.7.1
+torchaudio==2.7.1
+torchvision==0.22.1
+
+# Transformers and NLP
+transformers==5.2.0
+tokenizers==0.22.2
+
+# Audio processing
+encodec==0.1.1
+librosa==0.11.0
+soundfile==0.13.1
+phonemizer==3.3.0
+
+# Scientific computing
+numpy==2.2.6
+scipy==1.15.3
+
+# Training utilities
+tensorboard==2.20.0
+tqdm==4.67.3
+
+# Utilities
+einops==0.8.2
+Cython==3.2.4
+PyYAML==6.0.3

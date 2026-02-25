@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  llm-istft-vits:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: llm-istft-vits:latest
+    container_name: llm-istft-vits
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./logs:/workspace/logs
+      - ./checkpoints:/workspace/checkpoints
+      - ./pretrained_llm:/workspace/pretrained_llm
+      - ./encodec_pretrained:/workspace/encodec_pretrained
+      - ./filelists:/workspace/filelists
+      - ./configs:/workspace/configs
+    ports:
+      - "6006:6006"  # TensorBoard
+    shm_size: '8gb'
+    stdin_open: true
+    tty: true
+    command: /bin/bash
