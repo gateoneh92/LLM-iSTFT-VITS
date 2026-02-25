@@ -194,17 +194,13 @@ def run(rank, world_size, hps):
         print("📂 Checking for checkpoints...", flush=True)
 
     try:
-        # For DDP, need to load to module
-        model_g = net_g.module if is_distributed else net_g
-        model_d = net_d.module if is_distributed else net_d
-
         _, _, _, epoch_str = utils.load_checkpoint(
             utils.latest_checkpoint_path(hps.checkpoint_dir, "G_*.pth"),
-            model_g, optim_g
+            net_g, optim_g
         )
         _, _, _, _ = utils.load_checkpoint(
             utils.latest_checkpoint_path(hps.checkpoint_dir, "D_*.pth"),
-            model_d, optim_d
+            net_d, optim_d
         )
         global_step = (epoch_str - 1) * len(train_loader)
         if is_main_process and logger:
@@ -232,10 +228,8 @@ def run(rank, world_size, hps):
     if epoch_str == 1 and is_main_process:
         print("💾 Saving initial checkpoint...", flush=True)
         logger.info("Saving initial checkpoint")
-        model_g = net_g.module if is_distributed else net_g
-        model_d = net_d.module if is_distributed else net_d
-        utils.save_checkpoint(model_g, optim_g, hps.train.learning_rate, 0, os.path.join(hps.checkpoint_dir, "G_init.pth"))
-        utils.save_checkpoint(model_d, optim_d, hps.train.learning_rate, 0, os.path.join(hps.checkpoint_dir, "D_init.pth"))
+        utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, 0, os.path.join(hps.checkpoint_dir, "G_init.pth"))
+        utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, 0, os.path.join(hps.checkpoint_dir, "D_init.pth"))
         print("✅ Initial checkpoint saved", flush=True)
 
     # Synchronize all processes
@@ -269,10 +263,8 @@ def run(rank, world_size, hps):
         # Save checkpoint on exit (only on main process)
         if is_main_process:
             logger.info("Saving final checkpoint")
-            model_g = net_g.module if is_distributed else net_g
-            model_d = net_d.module if is_distributed else net_d
-            utils.save_checkpoint(model_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"G_latest.pth"))
-            utils.save_checkpoint(model_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"D_latest.pth"))
+            utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"G_latest.pth"))
+            utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"D_latest.pth"))
             logger.info(f"Saved checkpoint to {hps.checkpoint_dir}/G_latest.pth and D_latest.pth")
 
     # Cleanup distributed
@@ -379,18 +371,14 @@ def train_epoch(rank, epoch, hps, net_g, net_d, optim_g, optim_d,
         # Save checkpoint at specified interval (only on main process)
         if global_step % hps.train.save_interval == 0 and is_main_process:
             logger.info(f"Saving checkpoint at step {global_step}")
-            model_g = net_g.module if is_distributed else net_g
-            model_d = net_d.module if is_distributed else net_d
-            utils.save_checkpoint(model_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"G_step{global_step}.pth"))
-            utils.save_checkpoint(model_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"D_step{global_step}.pth"))
+            utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"G_step{global_step}.pth"))
+            utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"D_step{global_step}.pth"))
 
     # Save checkpoint at end of epoch (only on main process)
     if (epoch % 10 == 0 or epoch == 1) and is_main_process:
         logger.info(f"Saving checkpoint at epoch {epoch}")
-        model_g = net_g.module if is_distributed else net_g
-        model_d = net_d.module if is_distributed else net_d
-        utils.save_checkpoint(model_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"G_{epoch}.pth"))
-        utils.save_checkpoint(model_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"D_{epoch}.pth"))
+        utils.save_checkpoint(net_g, optim_g, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"G_{epoch}.pth"))
+        utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch, os.path.join(hps.checkpoint_dir, f"D_{epoch}.pth"))
 
     scheduler_g.step()
     scheduler_d.step()
