@@ -301,15 +301,26 @@ def train_epoch(rank, epoch, hps, net_g, net_d, optim_g, optim_d,
             # Forward pass
             audio_logits, pred_mel, y_hat, y_hat_mb = net_g(ipa_tokens, audio_tokens)
 
-            # Loss 1: LLM Loss (cross entropy)
-            # Only compute loss on audio positions (skip text positions)
+            # ==========================================
+            # [수정된 부분] Loss 1: LLM Loss (cross entropy)
+            # ==========================================
             text_len = ipa_tokens.size(1)
-            audio_logits_only = audio_logits[:, text_len:, :]  # [batch, audio_len, vocab]
+            audio_len = audio_tokens.size(2)
 
+            # Autoregressive 특성에 맞게 Logits을 1칸 Shift (t 시점의 출력으로 t+1 시점의 토큰을 예측)
+            # 텍스트의 마지막 토큰(text_len - 1)이 첫 번째 오디오 토큰을 예측하도록 범위 조정
+            audio_logits_shifted = audio_logits[:, text_len - 1 : text_len + audio_len - 1, :]
+            
+            # 정답 타겟 (첫 번째 Codebook)
+            target_tokens = audio_tokens[:, 0, :].long()
+
+            # 패딩(Padding) 토큰이 0이라고 가정하고 Loss 계산에서 제외 (ignore_index=0 추가)
             loss_llm = F.cross_entropy(
-                audio_logits_only.reshape(-1, audio_logits_only.size(-1)),
-                audio_tokens[:, 0, :].reshape(-1).long()  # First codebook
+                audio_logits_shifted.reshape(-1, audio_logits_shifted.size(-1)),
+                target_tokens.reshape(-1),
+                ignore_index=0  
             )
+            # ==========================================
 
             # Loss 2: Mel Loss
             mel_gt = mel_spectrogram_torch(
