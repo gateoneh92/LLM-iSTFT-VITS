@@ -68,12 +68,7 @@ class IPAGPT2TTS(nn.Module):
         """
         Args:
             ipa_input_ids: [batch, text_len] - IPA token indices
-            audio_tokens: [batch, n_codebooks, audio_len] - Audio tokens (for teacher forcing)
-            speaker_id: [batch] - Speaker ID
-            attention_mask: [batch, seq_len] - Attention mask
-
-        Returns:
-            audio_logits: [batch, seq_len, n_audio_vocab]
+            ...
         """
         batch_size = ipa_input_ids.size(0)
         text_len = ipa_input_ids.size(1)
@@ -81,27 +76,41 @@ class IPAGPT2TTS(nn.Module):
         # IPA text embedding (GPT-2's wte)
         text_emb = self.gpt2.wte(ipa_input_ids)  # [batch, text_len, hidden]
 
+        # ==========================================
+        # [수정된 부분] Attention Mask 자동 생성 로직 추가
+        # ==========================================
+        if attention_mask is None:
+            # 패딩 토큰(0)을 제외한 실제 데이터 위치만 1로 마스킹
+            text_mask = (ipa_input_ids != 0).long()
+            
+            if audio_tokens is not None:
+                audio_mask = (audio_tokens[:, 0, :] != 0).long()
+                attention_mask = torch.cat([text_mask, audio_mask], dim=1)
+            else:
+                attention_mask = text_mask
+                
+        # GPT-2 모델의 내부 형태에 맞게 4D 마스크로 변환 [batch, 1, 1, seq_len]
+        attention_mask = attention_mask[:, None, None, :]
+        # ==========================================
+
         if audio_tokens is not None:
             # Training: teacher forcing
-            # Average all codebook embeddings
             audio_len = audio_tokens.size(2)
             audio_emb_list = []
             for i in range(self.n_codebooks):
                 audio_emb_list.append(self.audio_embs[i](audio_tokens[:, i, :]))
-            audio_emb = torch.stack(audio_emb_list, dim=0).mean(dim=0)  # [batch, audio_len, hidden]
+            audio_emb = torch.stack(audio_emb_list, dim=0).mean(dim=0)
 
             # Concatenate text and audio
-            combined_emb = torch.cat([text_emb, audio_emb], dim=1)  # [batch, text_len+audio_len, hidden]
+            combined_emb = torch.cat([text_emb, audio_emb], dim=1)
         else:
-            # Inference: only text
             combined_emb = text_emb
 
-        # Add speaker embedding
+        # (이하 기존 코드 동일...)
         if self.speaker_emb is not None and speaker_id is not None:
-            speaker_emb = self.speaker_emb(speaker_id).unsqueeze(1)  # [batch, 1, hidden]
+            speaker_emb = self.speaker_emb(speaker_id).unsqueeze(1)
             combined_emb = combined_emb + speaker_emb
 
-        # Add positional embeddings
         seq_len = combined_emb.size(1)
         position_ids = torch.arange(seq_len, dtype=torch.long, device=combined_emb.device)
         position_ids = position_ids.unsqueeze(0).expand(batch_size, -1)
@@ -110,16 +119,13 @@ class IPAGPT2TTS(nn.Module):
         hidden_states = combined_emb + position_emb
         hidden_states = self.gpt2.drop(hidden_states)
 
-        # Pass through transformer blocks
+        # Pass through transformer blocks (마스크 적용됨)
         for block in self.gpt2.h:
             outputs = block(hidden_states, attention_mask=attention_mask)
             hidden_states = outputs[0]
 
-        # Final layer norm
         hidden_states = self.gpt2.ln_f(hidden_states)
-
-        # Predict audio tokens (only for audio positions)
-        audio_logits = self.audio_head(hidden_states)  # [batch, seq_len, n_audio_vocab]
+        audio_logits = self.audio_head(hidden_states)
 
         return audio_logits
 
